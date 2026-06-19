@@ -3,3 +3,4 @@ venv/
 __pycache__/
 *.pyc
 modelo_rostro.xml
+data_rostro/
