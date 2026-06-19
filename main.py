@@ -115,7 +115,7 @@ def gestionar_apuntes(texto_comando):
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             with open(ARCHIVO_NOTAS, "a", encoding="utf-8") as f:
                 f.write(f"[{timestamp}] - {nota}\n")
-            hablar("Entendido, Señor. He registrado esa anotación en los apuntes.")
+            hablar("Entendido, Señor. He registrado esa anotación in los apuntes.")
             return True
     return False
 
@@ -226,12 +226,14 @@ def bucle_principal():
             if gestionar_apuntes(orden):
                 continue
 
-            # 🎯 ENRUTADOR INTELIGENTE ASIMÉTRICO DE CANALES
-            palabras_gopro = ["mesa", "gopro", "go pro", "objetos", "tengo en", "ves en la"]
-            palabras_laptop = ["me veo", "mi cara", "mi rostro", "cómo luzco", "mi aspecto", "sobre mí", "mírame"]
-            
+            # 🎯 ENRUTADOR INTELIGENTE ASIMÉTRICO DE CANALES (OPTIMIZADO CON FILTROS DE INDUMENTARIA Y ÓPTICAS)
+            palabras_gopro = ["mesa", "gopro", "go pro", "objetos", "tengo en", "ves en la", "cámara secundaria"]
+            palabras_laptop = ["me veo", "mi cara", "mi rostro", "cómo luzco", "mi aspecto", "sobre mí", "mírame", "camiseta", "ropa", "traigo puesto", "cámara principal", "cámara de la laptop", "laptop"]
+            palabras_vision_general = ["mira", "observa", "qué ves", "analiza", "inspecciona"]
+
             requiere_gopro = any(p in orden for p in palabras_gopro)
             requiere_laptop = any(p in orden for p in palabras_laptop)
+            requiere_vision_general = any(p in orden for p in palabras_vision_general)
 
             # CASO A: Canal Visión Nativo Groq - Óptica GoPro (Mesa)
             if requiere_gopro:
@@ -250,8 +252,8 @@ def bucle_principal():
                 else:
                     respuesta_alfred = "Error de telemetría, Señor. La GoPro no devolvió señal de video válida."
 
-            # CASO B: Canal Visión Nativo Groq - Óptica Laptop (Rostro)
-            elif requiere_laptop:
+            # CASO B: Canal Visión Nativo Groq - Óptica Laptop (Rostro, Camiseta, Ropa o Visión General por defecto)
+            elif requiere_laptop or requiere_vision_general:
                 hilo_espera = hablar_en_paralelo("Un momento, Señor. Procedo a capturar la matriz óptica de su aspecto.")
                 
                 ret_l, frame_lap = False, None
@@ -262,7 +264,7 @@ def bucle_principal():
                 hilo_espera.join()
 
                 if ret_l and frame_lap is not None:
-                    print("🧠 [Groq Visión]: Transmitiendo fotograma facial a Llama-4-Scout...")
+                    print("🧠 [Groq Visión]: Transmitiendo fotograma facial/corporal a Llama-4-Scout...")
                     respuesta_alfred = consultar_alfred_vision(orden, frame_lap, es_gopro=False)
                 else:
                     respuesta_alfred = "Error de hardware, Señor. La cámara de la laptop no devolvió señal."
