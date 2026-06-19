@@ -10,8 +10,9 @@ import edge_tts
 import pygame  # Control de audio premium nativo
 import threading  # Para paralelizar el escaneo por hardware mientras Alfred habla
 
-# 🎯 ENLACE CRÍTICO: Importación del cerebro LLM local
+# 🎯 ENLACES CRÍTICOS NATIVOS IMPORTADOS DESDE EL ARRANQUE
 from cerebro_llm import consultar_alfred
+from ojos_vlm import analizar_escena
 
 load_dotenv()
 
@@ -51,7 +52,7 @@ def hablar(texto):
             pygame.mixer.music.load(archivo_audio)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
-                time.sleep(0.05)
+                time.sleep(0.02)  # Reducido a 20ms para mayor reactividad del hilo de audio
             pygame.mixer.music.unload()  # Liberar archivo inmediatamente
             
     except Exception as e:
@@ -61,6 +62,12 @@ def hablar(texto):
             try: os.remove(archivo_audio)
             except: pass
 
+def hablar_en_paralelo(texto):
+    """Lanza una alocución en un hilo independiente para no congelar los sensores o la red."""
+    hilo = threading.Thread(target=hablar, args=(texto,))
+    hilo.start()
+    return hilo
+
 def configurar_opticas(cap):
     if cap.isOpened():
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -68,12 +75,13 @@ def configurar_opticas(cap):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 def escuchar_operador():
-    """Usa el micrófono de AMD explícitamente configurado en el Índice 3."""
+    """Configuración del micrófono AMD optimizada para frases completas sin cortes."""
     r = sr.Recognizer()
     
     r.dynamic_energy_threshold = True
-    r.pause_threshold = 0.8
-    r.non_speaking_duration = 0.4
+    # 🔥 SOLUCIÓN AL CORTE DE VOZ:
+    r.pause_threshold = 1.2          # Espera 1.2 segundos de silencio absoluto antes de asumir que terminaste
+    r.non_speaking_duration = 0.5    
     
     INDICE_MIC_AMD = 3  
     
@@ -81,19 +89,18 @@ def escuchar_operador():
         with sr.Microphone(device_index=INDICE_MIC_AMD, sample_rate=48000) as source:
             print("\n🎙️ [Escuchando...] Ordene, Señor Gerardo...")
             
-            r.adjust_for_ambient_noise(source, duration=0.2)
+            r.adjust_for_ambient_noise(source, duration=0.2)  # Calibración estable
             
-            audio = r.listen(source, timeout=4, phrase_time_limit=6)
+            # 🔥 SOLUCIÓN AL LÍMITE DE TIEMPO: Ampliado phrase_time_limit a 15 segundos para órdenes complejas
+            audio = r.listen(source, timeout=5, phrase_time_limit=15)
             print("📡 [Procesando comandos de voz...]")
             comando = r.recognize_google(audio, language="es-ES")
             print(f"👤 [Mister Gerardo]: {comando}")
             return comando.lower()
             
     except sr.WaitTimeoutError:
-        print("⏳ [Micrófono]: Silencio detectado (Tiempo de espera agotado).")
         return ""
     except sr.UnknownValueError:
-        print("❓ [Micrófono]: Ruido detectado pero la frase no fue inteligible.")
         return ""
     except Exception as e:
         print(f"⚠️ [Error de micrófono]: {e}")
@@ -121,8 +128,8 @@ def leer_ultimos_apuntes():
             return "".join(f.readlines()[-3:])
     return "No hay registros previos anotados hoy."
 
-def realizar_escaneo_biometrico():
-    """Verifica identidad local por hardware y retorna el estado junto al fotograma capturado."""
+def realizar_escaneo_biometrico(cap_laptop_global):
+    """Verifica identidad local por hardware utilizando el flujo óptico global continuo."""
     print("\n🔒 [PROTOCOLO DE SEGURIDAD]: Matriz Bloqueada. Verificando identidad local...")
     
     if not os.path.exists('modelo_rostro.xml'):
@@ -140,21 +147,17 @@ def realizar_escaneo_biometrico():
 
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-    hilo_voz = threading.Thread(target=hablar, args=("Iniciando escaneo biométrico. Mire fijamente a la cámara, Señor.",))
-    hilo_voz.start()
-    
-    cap0 = cv2.VideoCapture(CAMARA_LAPTOP)
-    configurar_opticas(cap0)
+    hilo_voz = hablar_en_paralelo("Iniciando escaneo biométrico. Mire fijamente a la cámara, Señor.")
     
     acceso_concedido = False
     frame_rostro = None
     inicio_busqueda = time.time()
     
     while time.time() - inicio_busqueda < 5.0:
-        if not cap0.isOpened():
+        if not cap_laptop_global.isOpened():
             continue
             
-        ret, frame = cap0.read()
+        ret, frame = cap_laptop_global.read()
         if not ret or frame is None:
             continue
             
@@ -170,24 +173,34 @@ def realizar_escaneo_biometrico():
             if label == 1 and confianza < 75:
                 print(f"🎯 [Sistemas]: Identidad confirmada por hardware local (Confianza: {confianza:.2f})")
                 acceso_concedido = True
-                frame_rostro = frame.copy()  # Preservamos el frame exacto de su rostro para el VLM
+                frame_rostro = frame.copy()
                 break
                 
         if acceso_concedido:
             break
-        time.sleep(0.03)
+        time.sleep(0.01)
         
-    cap0.release()
     hilo_voz.join()
     return acceso_concedido, frame_rostro
 
 def bucle_principal():
-    print("🦇 [Protocolo Alfred Windows]: Inicializando sistemas interactivos...")
+    print("🦇 [Protocolo Alfred Windows]: Inicializando periféricos globales de la estación...")
     
-    acceso, frame_inicial = realizar_escaneo_biometrico()
+    cap_laptop = cv2.VideoCapture(CAMARA_LAPTOP)
+    configurar_opticas(cap_laptop)
+    
+    cap_gopro = cv2.VideoCapture(FUENTE_GOPRO, cv2.CAP_DSHOW)
+    if not cap_gopro.isOpened():
+        print("🔍 [Sistemas]: GoPro no detectada en índice 6 con DirectShow. Probando apertura estándar...")
+        cap_gopro = cv2.VideoCapture(FUENTE_GOPRO)
+    configurar_opticas(cap_gopro)
+    
+    acceso, frame_inicial = realizar_escaneo_biometrico(cap_laptop)
     if not acceso:
         print("\n🚨 [ALERTA DE SEGURIDAD]: Identidad no verificada.")
         hablar("Acceso denegado. Apagando los sistemas.")
+        cap_laptop.release()
+        if cap_gopro.isOpened(): cap_gopro.release()
         sys.exit()
         
     print("\n🔓 [ACCESO CONCEDIDO]: Identidad confirmada.\n")
@@ -197,8 +210,7 @@ def bucle_principal():
     if frame_inicial is not None:
         print("🧠 [Biometría Avanzada]: Consultando VLM para analizar la expresión de Mister Gerardo...")
         try:
-            from ojos_vlm import analizar_escena
-            telemetria_animo = analizar_escena(frame_inicial)
+            telemetria_animo = analizar_escena(frame_inicial, es_gopro=False)
             print(f"[TELEMETRÍA EMOCIONAL NATIVA]: '{telemetria_animo}'\n")
         except Exception as e:
             print(f"⚠️ [Error de VLM en inicio]: {e}")
@@ -214,14 +226,6 @@ def bucle_principal():
     print("🧠 [Cerebro LLM]: Formulando saludo interactivo en Groq...")
     respuesta_saludo = consultar_alfred(prompt_saludo, rostro_detectado="Confirmado")
     hablar(respuesta_saludo)
-    
-    # 📡 ENLAZAR LA GOPRO EN EL ÍNDICE 6 FORZANDO EL BACKEND DIRECTSHOW DE WINDOWS
-    cap_gopro = cv2.VideoCapture(FUENTE_GOPRO, cv2.CAP_DSHOW)
-    if not cap_gopro.isOpened():
-        print("🔍 [Sistemas]: GoPro no detectada en índice 6 con DirectShow. Probando apertura estándar...")
-        cap_gopro = cv2.VideoCapture(FUENTE_GOPRO)
-        
-    configurar_opticas(cap_gopro)
 
     try:
         while True:
@@ -238,56 +242,59 @@ def bucle_principal():
 
             # 🎯 ENRUTADOR INTELIGENTE DE CÁMARAS Y CONTEXTO VISUAL
             palabras_gopro = ["mesa", "gopro", "go pro", "objetos", "tengo en", "ves en la"]
-            palabras_laptop = ["me veo", "mi cara", "mi rostro", "cómo luzco", "mi aspecto", "sobre mí"]
+            palabras_laptop = ["me veo", "mi cara", "mi rostro", "cómo luzco", "mi aspecto", "sobre mí", "mírame"]
             
             requiere_gopro = any(p in orden for p in palabras_gopro)
             requiere_laptop = any(p in orden for p in palabras_laptop)
 
-            telemetria_contexto = "Análisis visual omitido (El comando no requiere inspección por cámara)."
+            telemetria_contexto = "Análisis visual omitido."
 
             # CASO A: Análisis de la Mesa mediante la GoPro
             if requiere_gopro:
+                hilo_espera = hablar_en_paralelo("Por supuesto. Permítame enfocar los sensores de la GoPro hacia la mesa de trabajo.")
+                
                 ret, frame_gopro = False, None
                 if cap_gopro.isOpened():
-                    # Limpiar buffer leyendo un par de frames
-                    for _ in range(2): cap_gopro.read()
+                    for _ in range(2): cap_gopro.read()  # Vaciado veloz del búfer de hardware
                     ret, frame_gopro = cap_gopro.read()
 
                 if ret and frame_gopro is not None:
-                    print("👀 [Ojos VLM]: Capturando y procesando entorno desde la GoPro (Mesa)...")
-                    from ojos_vlm import analizar_escena
-                    telemetria_contexto = f"Telemetría actual de la MESA vista por la GoPro: {analizar_escena(frame_gopro)}"
+                    print("👀 [Ojos VLM]: Capturando y procesando entorno desde la GoPro...")
+                    # Guardamos la telemetría textual pura devuelta por Moondream
+                    telemetria_contexto = analizar_escena(frame_gopro, es_gopro=True)
                 else:
                     telemetria_contexto = "Error de hardware: La GoPro no devolvió señal de video válida."
+                
+                hilo_espera.join()
 
-            # CASO B: Análisis del Rostro/Físico del operador mediante la Laptop
+            # CASO B: Análisis del Rostro mediante la Laptop
             elif requiere_laptop:
-                print("📸 [Sensores Locales]: Activando cámara de la laptop para inspección de aspecto...")
-                cap_lap = cv2.VideoCapture(CAMARA_LAPTOP)
-                configurar_opticas(cap_lap)
+                hilo_espera = hablar_en_paralelo("Un momento, Señor. Procedo a capturar la matriz óptica de su aspecto.")
+                
                 ret_l, frame_lap = False, None
-                if cap_lap.isOpened():
-                    time.sleep(0.1)  # Breve latencia para exposición de luz
-                    ret_l, frame_lap = cap_lap.read()
-                cap_lap.release()
+                if cap_laptop.isOpened():
+                    for _ in range(2): cap_laptop.read()  # Vaciado veloz del búfer
+                    ret_l, frame_lap = cap_laptop.read()
 
                 if ret_l and frame_lap is not None:
-                    print("🧠 [Ojos VLM]: Procesando fotograma facial del operador desde la laptop...")
-                    from ojos_vlm import analizar_escena
-                    telemetria_contexto = f"Telemetría actual del ASPECTO/ROSTRO de Mister Gerardo visto por la laptop: {analizar_escena(frame_lap)}"
+                    print("🧠 [Ojos VLM]: Procesando fotograma facial del operador...")
+                    telemetria_contexto = analizar_escena(frame_lap, es_gopro=False)
                 else:
-                    telemetria_contexto = "Error de hardware: La cámara de la laptop no pudo ser inicializada."
+                    telemetria_contexto = "Error de hardware: La cámara de la laptop no devolvió señal."
+                
+                hilo_espera.join()
 
             memoria_trabajo = leer_ultimos_apuntes()
 
+            # 🔥 OPTIMIZACIÓN DEL PROMPT DE LLAMADA: Directiva estricta para forzar la descripción visual
             prompt_inyectado = (
                 f"Actúa estrictamente como Alfred, el ingenioso, sarcástico pero sumamente leal mayordomo virtual de Mister Gerardo. "
                 f"Él te acaba de decir por comando de voz: '{orden}'. "
-                f"Entorno visual capturado: {telemetria_contexto}. "
-                f"Las últimas notas del laboratorio son: {memoria_trabajo}. "
-                f"Responde de manera carismática, directa y con tu característico sentido del humor británico. "
-                f"Usa los datos visuales provistos únicamente si corresponden al contexto de la pregunta de Mister Gerardo. "
-                f"Si el análisis visual indica que fue omitido, responde directamente sin inventar objetos en el entorno. Sé breve y fluido."
+                f"CRÍTICO: Tus sensores de cámara reportan detalladamente lo siguiente sobre el entorno o su aspecto: '{telemetria_contexto}'. "
+                f"Las últimas notas del laboratorio son: '{memoria_trabajo}'. "
+                f"INSTRUCCIÓN OBLIGATORIA: Si el reporte de los sensores NO dice 'Análisis visual omitido', debes integrar "
+                f"minuciosamente los datos de los sensores en tu respuesta, diciéndole formal pero sarcásticamente a Mister Gerardo qué es exactamente lo que ves (ya sea en su rostro o en la mesa según corresponda). "
+                f"Responde directamente, con humor británico y de forma concisa."
             )
 
             print("🧠 [Cerebro LLM]: Procesando comando en Groq...")
@@ -296,13 +303,14 @@ def bucle_principal():
             hablar(respuesta_alfred)
             print("-" * 50)
             
-            time.sleep(0.1)
+            time.sleep(0.01)
 
     except KeyboardInterrupt:
         print("\n🛑 Desactivando sistemas de forma manual.")
     finally:
-        if cap_gopro.isOpened():
-            cap_gopro.release()
+        print("🔌 Clausurando flujos de hardware óptico de forma limpia...")
+        if cap_laptop.isOpened(): cap_laptop.release()
+        if cap_gopro.isOpened(): cap_gopro.release()
 
 if __name__ == "__main__":
     bucle_principal()
