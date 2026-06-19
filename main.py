@@ -10,9 +10,8 @@ import edge_tts
 import pygame  # Control de audio premium nativo
 import threading  # Para paralelizar el escaneo por hardware mientras Alfred habla
 
-# 🎯 ENLACES CRÍTICOS NATIVOS IMPORTADOS DESDE EL ARRANQUE
-from cerebro_llm import consultar_alfred
-from ojos_vlm import analizar_escena
+# 🎯 ENLACES CRÍTICOS NATIVOS INTERCONECTADOS CON TU NUEVA CAPA DE INFERENCIA
+from cerebro_llm import consultar_alfred_texto, consultar_alfred_vision
 
 load_dotenv()
 
@@ -52,7 +51,7 @@ def hablar(texto):
             pygame.mixer.music.load(archivo_audio)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
-                time.sleep(0.02)  # Reducido a 20ms para mayor reactividad del hilo de audio
+                time.sleep(0.02)  # 20ms para alta reactividad táctica
             pygame.mixer.music.unload()  # Liberar archivo inmediatamente
             
     except Exception as e:
@@ -75,12 +74,11 @@ def configurar_opticas(cap):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 def escuchar_operador():
-    """Configuración del micrófono AMD optimizada para frases completas sin cortes."""
+    """Configuración del micrófono AMD optimizada para frases completas sin cortes prematuros."""
     r = sr.Recognizer()
     
     r.dynamic_energy_threshold = True
-    # 🔥 SOLUCIÓN AL CORTE DE VOZ:
-    r.pause_threshold = 1.2          # Espera 1.2 segundos de silencio absoluto antes de asumir que terminaste
+    r.pause_threshold = 1.2          # Espera estable para capturar oraciones completas
     r.non_speaking_duration = 0.5    
     
     INDICE_MIC_AMD = 3  
@@ -89,9 +87,8 @@ def escuchar_operador():
         with sr.Microphone(device_index=INDICE_MIC_AMD, sample_rate=48000) as source:
             print("\n🎙️ [Escuchando...] Ordene, Señor Gerardo...")
             
-            r.adjust_for_ambient_noise(source, duration=0.2)  # Calibración estable
+            r.adjust_for_ambient_noise(source, duration=0.2)  
             
-            # 🔥 SOLUCIÓN AL LÍMITE DE TIEMPO: Ampliado phrase_time_limit a 15 segundos para órdenes complejas
             audio = r.listen(source, timeout=5, phrase_time_limit=15)
             print("📡 [Procesando comandos de voz...]")
             comando = r.recognize_google(audio, language="es-ES")
@@ -206,25 +203,14 @@ def bucle_principal():
     print("\n🔓 [ACCESO CONCEDIDO]: Identidad confirmada.\n")
     hablar("Acceso concedido, identidad confirmada.")
     
-    telemetria_animo = "No se pudo determinar el estado visual del operador."
+    # Saludo inicial inyectando el frame directo a Groq Vision (Canal Llama 4 Scout)
+    respuesta_saludo = "Señor, no se pudo enlazar la telemetría multimodal inicial."
     if frame_inicial is not None:
-        print("🧠 [Biometría Avanzada]: Consultando VLM para analizar la expresión de Mister Gerardo...")
-        try:
-            telemetria_animo = analizar_escena(frame_inicial, es_gopro=False)
-            print(f"[TELEMETRÍA EMOCIONAL NATIVA]: '{telemetria_animo}'\n")
-        except Exception as e:
-            print(f"⚠️ [Error de VLM en inicio]: {e}")
-
-    prompt_saludo = (
-        f"Actúa estrictamente como Alfred, el ingenioso, sarcástico pero sumamente leal mayordomo virtual de Mister Gerardo. "
-        f"Él se acaba de autenticar con éxito mediante escaneo facial. Lo que estás viendo en su rostro o estado físico actual "
-        f"a través del lente de la laptop según tus sensores visuales es: {telemetria_animo}. "
-        f"Dale una bienvenida formal, pero haz un comentario divertido, irónico o bromea abiertamente sobre cómo se ve hoy. "
-        f"Sé expresivo y conciso."
-    )
-    
-    print("🧠 [Cerebro LLM]: Formulando saludo interactivo en Groq...")
-    respuesta_saludo = consultar_alfred(prompt_saludo, rostro_detectado="Confirmado")
+        print("🧠 [Groq Multimodal]: Transmitiendo frame facial de bienvenida a Llama-4-Scout...")
+        respuesta_saludo = consultar_alfred_vision("Dame una bienvenida formal y analiza mi rostro o estado físico actual.", frame_inicial, es_gopro=False)
+    else:
+        respuesta_saludo = consultar_alfred_texto("Dale una bienvenida formal a Mister Gerardo e infórmale que la cámara falló.")
+        
     hablar(respuesta_saludo)
 
     try:
@@ -240,16 +226,14 @@ def bucle_principal():
             if gestionar_apuntes(orden):
                 continue
 
-            # 🎯 ENRUTADOR INTELIGENTE DE CÁMARAS Y CONTEXTO VISUAL
+            # 🎯 ENRUTADOR INTELIGENTE ASIMÉTRICO DE CANALES
             palabras_gopro = ["mesa", "gopro", "go pro", "objetos", "tengo en", "ves en la"]
             palabras_laptop = ["me veo", "mi cara", "mi rostro", "cómo luzco", "mi aspecto", "sobre mí", "mírame"]
             
             requiere_gopro = any(p in orden for p in palabras_gopro)
             requiere_laptop = any(p in orden for p in palabras_laptop)
 
-            telemetria_contexto = "Análisis visual omitido."
-
-            # CASO A: Análisis de la Mesa mediante la GoPro
+            # CASO A: Canal Visión Nativo Groq - Óptica GoPro (Mesa)
             if requiere_gopro:
                 hilo_espera = hablar_en_paralelo("Por supuesto. Permítame enfocar los sensores de la GoPro hacia la mesa de trabajo.")
                 
@@ -257,17 +241,16 @@ def bucle_principal():
                 if cap_gopro.isOpened():
                     for _ in range(2): cap_gopro.read()  # Vaciado veloz del búfer de hardware
                     ret, frame_gopro = cap_gopro.read()
-
-                if ret and frame_gopro is not None:
-                    print("👀 [Ojos VLM]: Capturando y procesando entorno desde la GoPro...")
-                    # Guardamos la telemetría textual pura devuelta por Moondream
-                    telemetria_contexto = analizar_escena(frame_gopro, es_gopro=True)
-                else:
-                    telemetria_contexto = "Error de hardware: La GoPro no devolvió señal de video válida."
                 
                 hilo_espera.join()
 
-            # CASO B: Análisis del Rostro mediante la Laptop
+                if ret and frame_gopro is not None:
+                    print("🧠 [Groq Visión]: Transmitiendo fotograma de la mesa a Llama-4-Scout...")
+                    respuesta_alfred = consultar_alfred_vision(orden, frame_gopro, es_gopro=True)
+                else:
+                    respuesta_alfred = "Error de telemetría, Señor. La GoPro no devolvió señal de video válida."
+
+            # CASO B: Canal Visión Nativo Groq - Óptica Laptop (Rostro)
             elif requiere_laptop:
                 hilo_espera = hablar_en_paralelo("Un momento, Señor. Procedo a capturar la matriz óptica de su aspecto.")
                 
@@ -275,31 +258,26 @@ def bucle_principal():
                 if cap_laptop.isOpened():
                     for _ in range(2): cap_laptop.read()  # Vaciado veloz del búfer
                     ret_l, frame_lap = cap_laptop.read()
-
-                if ret_l and frame_lap is not None:
-                    print("🧠 [Ojos VLM]: Procesando fotograma facial del operador...")
-                    telemetria_contexto = analizar_escena(frame_lap, es_gopro=False)
-                else:
-                    telemetria_contexto = "Error de hardware: La cámara de la laptop no devolvió señal."
                 
                 hilo_espera.join()
 
-            memoria_trabajo = leer_ultimos_apuntes()
+                if ret_l and frame_lap is not None:
+                    print("🧠 [Groq Visión]: Transmitiendo fotograma facial a Llama-4-Scout...")
+                    respuesta_alfred = consultar_alfred_vision(orden, frame_lap, es_gopro=False)
+                else:
+                    respuesta_alfred = "Error de hardware, Señor. La cámara de la laptop no devolvió señal."
 
-            # 🔥 OPTIMIZACIÓN DEL PROMPT DE LLAMADA: Directiva estricta para forzar la descripción visual
-            prompt_inyectado = (
-                f"Actúa estrictamente como Alfred, el ingenioso, sarcástico pero sumamente leal mayordomo virtual de Mister Gerardo. "
-                f"Él te acaba de decir por comando de voz: '{orden}'. "
-                f"CRÍTICO: Tus sensores de cámara reportan detalladamente lo siguiente sobre el entorno o su aspecto: '{telemetria_contexto}'. "
-                f"Las últimas notas del laboratorio son: '{memoria_trabajo}'. "
-                f"INSTRUCCIÓN OBLIGATORIA: Si el reporte de los sensores NO dice 'Análisis visual omitido', debes integrar "
-                f"minuciosamente los datos de los sensores en tu respuesta, diciéndole formal pero sarcásticamente a Mister Gerardo qué es exactamente lo que ves (ya sea en su rostro o en la mesa según corresponda). "
-                f"Responde directamente, con humor británico y de forma concisa."
-            )
+            # CASO C: Canal Texto Express Groq - Llama 3.1 8B Instant (Comandos sin cámara)
+            else:
+                memoria_trabajo = leer_ultimos_apuntes()
+                prompt_inyectado = (
+                    f"Orden del operador: '{orden}'. "
+                    f"Las últimas notas del laboratorio son: '{memoria_trabajo}'. "
+                )
+                print("🧠 [Cerebro LLM]: Procesando comando de voz veloz en Llama-3.1-8b...")
+                respuesta_alfred = consultar_alfred_texto(prompt_inyectado)
 
-            print("🧠 [Cerebro LLM]: Procesando comando en Groq...")
-            respuesta_alfred = consultar_alfred(prompt_inyectado, rostro_detectado="Confirmado")
-            
+            # Salida sónica unificada por los altavoces
             hablar(respuesta_alfred)
             print("-" * 50)
             
